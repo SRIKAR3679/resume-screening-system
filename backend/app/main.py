@@ -14,7 +14,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
+    allow_origins=[
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'https://srikar3679.github.io',           # GitHub Pages
+        'https://srikar3679.github.io/resume-screening-system',
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

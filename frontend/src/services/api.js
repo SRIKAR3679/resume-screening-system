@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const API_BASE = '/api'
+// In development: use Vite proxy (/api → localhost:8000)
+// In production (GitHub Pages): call Render backend directly
+const API_BASE = import.meta.env.DEV
+  ? '/api'
+  : 'https://resume-screening-api-ijjk.onrender.com/api'
 
 // Create axios instance
 const api = axios.create({
@@ -21,11 +25,13 @@ api.interceptors.response.use(
   err => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      // Use correct path for GitHub Pages
+      window.location.href = '/resume-screening-system/login'
     }
     return Promise.reject(err)
   }
 )
+
 
 // Auth API
 export const authAPI = {
