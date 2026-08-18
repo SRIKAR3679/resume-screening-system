@@ -224,37 +224,38 @@ def normalize_skill(skill: str) -> str:
 
 def extract_skills_from_text(text: str) -> List[str]:
     """
-    Extract skills from resume or job description text.
-    Case-insensitive search against the SKILLS_DB.
-    Also checks normalization map for variant forms.
+    Extract skills from resume text.
+    Uses strict word-boundary matching to avoid false positives
+    (e.g., 'R' should not match in 'CAREER', 'C' should not match in 'COLLEGE').
 
     Returns:
-        List of unique normalized skill names found in text.
+        List of unique normalized skill names actually found in the text.
     """
+    import re
     text_lower = text.lower()
     found_skills: Set[str] = set()
 
-    # Search through skills database
+    # Search through skills database with strict word boundary matching
     for category, skills in SKILLS_DB.items():
         for skill in skills:
-            # Use word boundary matching for short skills to avoid false positives
             skill_lower = skill.lower()
-            if len(skill_lower) <= 2:
-                # Short acronyms: match as whole words only
-                import re
-                if re.search(r'\b' + re.escape(skill_lower) + r'\b', text_lower):
-                    found_skills.add(normalize_skill(skill))
-            else:
-                if skill_lower in text_lower:
-                    found_skills.add(normalize_skill(skill))
+            # Always use word boundary matching to avoid false positives
+            pattern = r'(?<![a-z0-9])' + re.escape(skill_lower) + r'(?![a-z0-9])'
+            if re.search(pattern, text_lower):
+                found_skills.add(normalize_skill(skill))
 
-    # Also check normalization map variants
-    import re
+    # Also check normalization map variants with word boundaries
     for variant, canonical in NORMALIZATION_MAP.items():
-        if variant in text_lower:
+        if len(variant) <= 2:
+            # Very short variants: strict whole-word match only
+            pattern = r'\b' + re.escape(variant) + r'\b'
+        else:
+            pattern = r'(?<![a-z0-9])' + re.escape(variant) + r'(?![a-z0-9])'
+        if re.search(pattern, text_lower):
             found_skills.add(canonical)
 
     return sorted(list(found_skills))
+
 
 
 def get_skill_categories(skills: List[str]) -> Dict[str, List[str]]:

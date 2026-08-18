@@ -87,46 +87,79 @@ def extract_email(text: str) -> str:
 
 
 def extract_phone(text: str) -> str:
-    """Extract phone number using regex (handles multiple formats)."""
+    """Extract phone number using strict regex — avoids matching year ranges like 2019-23."""
+    # Strict patterns that require actual phone number format
     patterns = [
-        r'\+?[\d\s\-\(\)]{10,15}',  # International
-        r'\b\d{10}\b',               # 10-digit Indian/US
-        r'\(\d{3}\)\s*\d{3}[-.]?\d{4}',  # US format
+        r'\+?\d{1,3}[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}',  # +91 9876543210
+        r'\b[6-9]\d{9}\b',                                          # Indian mobile (starts 6-9)
+        r'\b\d{3}[-.]\d{3}[-.]\d{4}\b',                           # 123-456-7890
+        r'\(\d{3}\)\s?\d{3}[-.]\d{4}',                            # (123) 456-7890
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
-            return match.group(0).strip()
+            val = match.group(0).strip()
+            # Reject if it looks like a year range (e.g. 2019-23, 2019 - 2023)
+            if re.match(r'^20\d{2}', val) or re.match(r'^19\d{2}', val):
+                continue
+            return val
     return ""
 
 
 def extract_name(text: str) -> str:
     """
-    Extract candidate name using spaCy NER (PERSON entity).
-    Falls back to first non-empty line of resume if spaCy unavailable.
+    Extract candidate name — skips institution/college/company names.
+    Uses spaCy NER first, then smart regex fallback.
     """
+    # Words that indicate it's NOT a person's name
+    NOT_NAME_KEYWORDS = [
+        'COLLEGE', 'UNIVERSITY', 'INSTITUTE', 'SCHOOL', 'ACADEMY', 'POLYTECHNIC',
+        'TECHNOLOGIES', 'SOLUTIONS', 'SYSTEMS', 'SERVICES', 'COMPANY', 'CORP',
+        'LIMITED', 'LTD', 'PVT', 'INC', 'FOUNDATION', 'TRUST', 'CENTRE', 'CENTER',
+        'RESUME', 'CV', 'CURRICULUM', 'PROFILE', 'SUMMARY', 'OBJECTIVE',
+        'DEPARTMENT', 'FACULTY', 'MANAGEMENT', 'ENGINEERING', 'SCIENCE',
+        'EDUCATION', 'EXPERIENCE', 'SKILLS', 'CONTACT', 'ADDRESS',
+        'PHARMACY', 'MEDICAL', 'HOSPITAL', 'CLINIC', 'BANK', 'FINANCE',
+    ]
+
     # Try spaCy NER first
     try:
         import spacy
         nlp = spacy.load("en_core_web_sm")
-        # Only process first 500 chars for efficiency
-        doc = nlp(text[:500])
+        doc = nlp(text[:600])
         for ent in doc.ents:
             if ent.label_ == "PERSON" and len(ent.text.split()) >= 2:
-                return ent.text.strip()
+                name = ent.text.strip()
+                # Validate: not an institution
+                if not any(kw in name.upper() for kw in NOT_NAME_KEYWORDS):
+                    return name
     except Exception:
-        pass  # Fall through to regex-based approach
+        pass
 
-    # Fallback: first meaningful line (likely the name in most resume formats)
+    # Fallback: scan first 10 lines for a person name
     lines = [line.strip() for line in text.split('\n') if line.strip()]
-    for line in lines[:5]:
-        # Skip lines that look like emails, phones, or section headers
-        if (not re.search(r'[@\d]', line) and
-                len(line.split()) >= 2 and
-                len(line) < 60 and
-                not any(kw in line.upper() for kw in ['RESUME', 'CV', 'CURRICULUM', 'PROFILE', 'SUMMARY'])):
+    for line in lines[:10]:
+        # Skip if contains digits (year, phone, etc)
+        if re.search(r'\d', line):
+            continue
+        # Skip if contains @ (email)
+        if '@' in line:
+            continue
+        # Skip if it contains institution/company keywords
+        if any(kw in line.upper() for kw in NOT_NAME_KEYWORDS):
+            continue
+        # Skip very long lines (likely descriptions)
+        if len(line) > 50:
+            continue
+        # Must have 2+ words, all looking like name parts
+        words = line.split()
+        if len(words) < 2 or len(words) > 5:
+            continue
+        # Each word should start with capital (proper noun)
+        if all(w[0].isupper() for w in words if w):
             return line
-    return lines[0] if lines else "Unknown"
+
+    return ""
 
 
 def extract_education(text: str) -> list:
