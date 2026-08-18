@@ -1,12 +1,7 @@
 import axios from 'axios'
 
-// Uses VITE_API_URL env variable if set (Render Static Site)
-// Falls back to proxy in dev, or Render backend in production
-const API_BASE = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : import.meta.env.DEV
-    ? '/api'
-    : 'https://resume-screening-system-kqtv.onrender.com/api'
+// Frontend and backend run on same server — always use /api
+const API_BASE = '/api'
 
 // Create axios instance
 const api = axios.create({

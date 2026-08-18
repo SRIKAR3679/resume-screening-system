@@ -1,11 +1,14 @@
 services:
-  # ─── FastAPI Backend ───────────────────────────────────────────────────────
+  # Single server — FastAPI serves both API and React frontend
   - type: web
-    name: resume-screening-api
+    name: resume-screening-system
     runtime: python
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: >
+      pip install -r backend/requirements.txt &&
+      cd frontend && npm install && npm run build &&
+      cd .. && mkdir -p backend/static &&
+      cp -r frontend/dist/. backend/static/
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SECRET_KEY
         value: resumeai2024secretkey256bit
@@ -22,19 +25,4 @@ services:
       - key: DEMO_USER_PASSWORD
         value: demo123
       - key: GROQ_API_KEY
-        value: ""   # Add your key from console.groq.com
-
-  # ─── React Frontend ────────────────────────────────────────────────────────
-  - type: web
-    name: resume-screening-frontend
-    runtime: static
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    envVars:
-      - key: VITE_API_URL
-        value: https://resume-screening-api.onrender.com
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+        value: ""

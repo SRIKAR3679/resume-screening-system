@@ -7,7 +7,7 @@ import { Toaster } from 'react-hot-toast'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/resume-screening-system">
+    <BrowserRouter>
       <App />
       <Toaster position="top-right" />
     </BrowserRouter>
