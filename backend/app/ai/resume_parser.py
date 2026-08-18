@@ -380,11 +380,12 @@ def compute_resume_score(parsed_data: dict) -> float:
 def parse_resume(file_path: str) -> dict:
     """
     Main resume parser function.
-    Determines file type, extracts text, and runs all extraction functions.
+    Uses Groq AI for intelligent extraction when available,
+    falls back to regex-based extraction if Groq is not configured.
 
     Returns:
         dict with keys: text, name, email, phone, education, experience_years,
-                         projects, certifications, keywords, resume_score
+                         projects, certifications, keywords, summary
     """
     file_path_obj = Path(file_path)
     ext = file_path_obj.suffix.lower()
@@ -397,20 +398,46 @@ def parse_resume(file_path: str) -> dict:
         raw_text = extract_text_from_docx(file_path)
     else:
         logger.error(f"Unsupported file type: {ext}")
-        raw_text = ""
 
     if not raw_text:
         logger.warning(f"No text extracted from {file_path}")
 
     cleaned_text = clean_text(raw_text)
 
-    # Run all extractions
-    education_list = extract_education(raw_text)
-    projects_list = extract_projects(raw_text)
-    certs_list = extract_certifications(raw_text)
-    keywords_list = extract_keywords(cleaned_text)
+    # ── Try Groq AI parsing first ──────────────────────────────────────────
+    try:
+        from app.ai.groq_engine import parse_resume_with_groq, is_groq_available
+        if is_groq_available():
+            logger.info("Using Groq AI for resume parsing...")
+            groq_result = parse_resume_with_groq(cleaned_text)
+            if groq_result:
+                logger.info(f"Groq parsed: {groq_result.get('name')} | {len(groq_result.get('skills', []))} skills")
+                return {
+                    "text": cleaned_text,
+                    "name": groq_result.get("name") or extract_name(raw_text),
+                    "email": groq_result.get("email") or extract_email(cleaned_text),
+                    "phone": groq_result.get("phone") or extract_phone(cleaned_text),
+                    "education": json.dumps(groq_result.get("education") or extract_education(raw_text)),
+                    "experience_years": float(groq_result.get("experience_years") or 0),
+                    "projects": json.dumps(groq_result.get("projects") or extract_projects(raw_text)),
+                    "certifications": json.dumps(groq_result.get("certifications") or extract_certifications(raw_text)),
+                    "keywords": json.dumps(groq_result.get("keywords") or extract_keywords(cleaned_text)),
+                    "summary": groq_result.get("summary", ""),
+                    # Also return skills so router can use them
+                    "_groq_skills": groq_result.get("skills", []),
+                    "_parsed_by": "groq",
+                }
+    except Exception as e:
+        logger.warning(f"Groq parsing failed, falling back to regex: {e}")
 
-    result = {
+    # ── Regex fallback ─────────────────────────────────────────────────────
+    logger.info("Using regex-based resume parsing...")
+    education_list  = extract_education(raw_text)
+    projects_list   = extract_projects(raw_text)
+    certs_list      = extract_certifications(raw_text)
+    keywords_list   = extract_keywords(cleaned_text)
+
+    return {
         "text": cleaned_text,
         "name": extract_name(raw_text),
         "email": extract_email(cleaned_text),
@@ -420,7 +447,6 @@ def parse_resume(file_path: str) -> dict:
         "projects": json.dumps(projects_list),
         "certifications": json.dumps(certs_list),
         "keywords": json.dumps(keywords_list),
+        "summary": "",
+        "_parsed_by": "regex",
     }
-
-    # Compute score (add skills from caller context — computed in router)
-    return result

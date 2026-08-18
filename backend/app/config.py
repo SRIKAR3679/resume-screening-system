@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = 'admin123'
     DEMO_USER_EMAIL: str = 'demo@resumeai.com'
     DEMO_USER_PASSWORD: str = 'demo123'
+    GROQ_API_KEY: str = ''  # Get free key at https://console.groq.com
 
     class Config:
         env_file = ".env"

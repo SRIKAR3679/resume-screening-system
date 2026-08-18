@@ -87,28 +87,64 @@ def analyze_match(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Prepare inputs for matching algorithm
-    resume_skills = [s.normalized_name for s in resume.skills]
-    job_skills = [s.normalized_name for s in job.skills]
+    # Prepare inputs
+    resume_skills = [s.name for s in resume.skills]
+    job_skills    = [s.name for s in job.skills]
 
     try:
         resume_edu = json.loads(resume.education) if resume.education else []
     except Exception:
         resume_edu = []
 
-    # Run AI matching
-    match_res = match_resume_to_job(
-        resume_text=resume.extracted_text or "",
-        resume_skills=resume_skills,
-        resume_education=resume_edu,
-        resume_experience_years=resume.experience_years or 0,
-        job_description=job.description or "",
-        job_skills=job_skills,
-        job_experience_required=job.experience_required or 0,
-        job_education_required=job.education_required or ""
-    )
+    match_res = None
 
-    # Save result to DB
+    # ── Try Groq AI matching first ─────────────────────────────────────────
+    try:
+        from app.ai.groq_engine import match_resume_to_job_with_groq, is_groq_available
+        if is_groq_available():
+            groq_res = match_resume_to_job_with_groq(
+                resume_text=resume.extracted_text or "",
+                resume_skills=resume_skills,
+                job_title=job.title,
+                job_description=job.description or "",
+                job_skills=job_skills,
+                experience_required=job.experience_required or 0,
+                education_required=job.education_required or "",
+            )
+            if groq_res:
+                match_res = {
+                    "overall_score": float(groq_res.get("overall_score", 0)),
+                    "skill_score":   float(groq_res.get("skill_score", 0)),
+                    "semantic_score": float(groq_res.get("semantic_score", 0)),
+                    "experience_score": float(groq_res.get("experience_score", 0)),
+                    "education_score": float(groq_res.get("education_score", 0)),
+                    "matching_skills": groq_res.get("matching_skills", []),
+                    "missing_skills":  groq_res.get("missing_skills", []),
+                    "suggestions":     groq_res.get("suggestions", []),
+                    "verdict":         groq_res.get("verdict", ""),
+                    "fit_level":       groq_res.get("fit_level", ""),
+                    "strengths":       groq_res.get("strengths", []),
+                    "_matched_by":     "groq",
+                }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Groq matching failed, falling back: {e}")
+
+    # ── Fallback: TF-IDF + Jaccard matching ───────────────────────────────
+    if not match_res:
+        fallback = match_resume_to_job(
+            resume_text=resume.extracted_text or "",
+            resume_skills=resume_skills,
+            resume_education=resume_edu,
+            resume_experience_years=resume.experience_years or 0,
+            job_description=job.description or "",
+            job_skills=job_skills,
+            job_experience_required=job.experience_required or 0,
+            job_education_required=job.education_required or "",
+        )
+        match_res = {**fallback, "_matched_by": "tfidf"}
+
+    # Save to DB
     job_match = JobMatch(
         resume_id=req.resume_id,
         job_id=req.job_id,
@@ -119,13 +155,20 @@ def analyze_match(
         education_score=match_res["education_score"],
         matching_skills=json.dumps(match_res["matching_skills"]),
         missing_skills=json.dumps(match_res["missing_skills"]),
-        suggestions=json.dumps(match_res["suggestions"])
+        suggestions=json.dumps(match_res["suggestions"]),
     )
     db.add(job_match)
     db.commit()
     db.refresh(job_match)
 
-    return _match_to_dict(job_match, job)
+    result = _match_to_dict(job_match, job)
+    # Add extra Groq fields to response
+    result["verdict"]     = match_res.get("verdict", "")
+    result["fit_level"]   = match_res.get("fit_level", "")
+    result["strengths"]   = match_res.get("strengths", [])
+    result["matched_by"]  = match_res.get("_matched_by", "tfidf")
+    return result
+
 
 
 @router.get("/history")

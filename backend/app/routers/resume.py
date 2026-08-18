@@ -53,10 +53,27 @@ def upload_resume(
     """
     file_path = save_upload_file(file, current_user.id)
     try:
-        # Parse resume text and extract structured data
+        # Parse resume — uses Groq AI if key configured, else regex
         parsed_data = parse_resume(file_path)
-        # Extract skills using NLP
-        extracted_skills = extract_skills_from_text(parsed_data["text"])
+
+        # Use Groq-extracted skills if available, else NLP extraction
+        if parsed_data.get("_groq_skills"):
+            extracted_skills = parsed_data["_groq_skills"]
+            logger.info(f"Using {len(extracted_skills)} Groq-extracted skills")
+        else:
+            extracted_skills = extract_skills_from_text(parsed_data["text"])
+
+        # Also try Groq skill extraction separately for extra skills
+        try:
+            from app.ai.groq_engine import extract_skills_with_groq, is_groq_available
+            if is_groq_available() and not parsed_data.get("_groq_skills"):
+                groq_skills = extract_skills_with_groq(parsed_data["text"])
+                if groq_skills:
+                    combined = list(set(extracted_skills + groq_skills))
+                    extracted_skills = combined
+                    logger.info(f"Combined skills total: {len(extracted_skills)}")
+        except Exception:
+            pass
 
         # Create Resume record
         resume = Resume(
