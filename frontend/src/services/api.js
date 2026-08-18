@@ -1,10 +1,12 @@
 import axios from 'axios'
 
-// In development: use Vite proxy (/api → localhost:8000)
-// In production (GitHub Pages): call Render backend directly
-const API_BASE = import.meta.env.DEV
-  ? '/api'
-  : 'https://resume-screening-system-kqtv.onrender.com/api'
+// Uses VITE_API_URL env variable if set (Render Static Site)
+// Falls back to proxy in dev, or Render backend in production
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : import.meta.env.DEV
+    ? '/api'
+    : 'https://resume-screening-system-kqtv.onrender.com/api'
 
 // Create axios instance
 const api = axios.create({
