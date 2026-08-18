@@ -108,11 +108,10 @@ def extract_phone(text: str) -> str:
 
 def extract_name(text: str, filename: str = "") -> str:
     """
-    Extract candidate name using multiple strategies (most reliable first):
-    1. 'Name: XXX' label in resume (very common in Indian resumes)
+    Extract candidate name using text-only strategies:
+    1. 'Name: XXX' label in resume (most reliable for Indian resumes)
     2. spaCy NER PERSON entity
-    3. Filename hint (e.g. 'Gouthami Resume.pdf')
-    4. Smart line scan skipping institutions, long ALL-CAPS lines
+    3. Smart line scan — skips institutions, ALL-CAPS, long lines
     """
 
     # ── Strategy 1: Look for "Name:" label ────────────────────────────────────
@@ -120,13 +119,13 @@ def extract_name(text: str, filename: str = "") -> str:
         r'(?:^|\n)\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
         r'(?:^|\n)\s*Full\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
         r'(?:^|\n)\s*Candidate\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
+        r'(?:^|\n)\s*Applicant\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
     ]
     for pattern in name_label_patterns:
         match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
             name = match.group(1).strip()
             if 2 <= len(name.split()) <= 5 and len(name) >= 4:
-                logger.info(f"Name extracted via label: {name}")
                 return name
 
     # Words that indicate it's NOT a person's name
@@ -141,7 +140,7 @@ def extract_name(text: str, filename: str = "") -> str:
         'NARAYANA', 'CHAITANYA', 'BHARATI', 'VIDYALAYA', 'VIKAS', 'KENDRIYA',
         'INTERNATIONAL', 'NATIONAL', 'GLOBAL', 'PUBLIC', 'PRIVATE', 'GOVERNMENT',
         'BHAVAN', 'NIKETAN', 'MANDIR', 'PEETH', 'SADAN', 'PARISHAD',
-        'BOARD', 'COUNCIL', 'SOCIETY', 'TRUST', 'COMMITTEE',
+        'BOARD', 'COUNCIL', 'SOCIETY', 'COMMITTEE', 'HIGH', 'HIGHER', 'SECONDARY',
     ]
 
     # ── Strategy 2: spaCy NER ─────────────────────────────────────────────────
@@ -153,32 +152,17 @@ def extract_name(text: str, filename: str = "") -> str:
             if ent.label_ == "PERSON" and len(ent.text.split()) >= 2:
                 name = ent.text.strip()
                 if not any(kw in name.upper() for kw in NOT_NAME_KEYWORDS):
-                    logger.info(f"Name extracted via spaCy: {name}")
                     return name
     except Exception:
         pass
 
-    # ── Strategy 3: Filename hint ─────────────────────────────────────────────
-    if filename:
-        # e.g. "Gouthami Resume.pdf" or "john_doe_cv.pdf"
-        fname = re.sub(r'\.(pdf|docx|doc)$', '', filename, flags=re.IGNORECASE)
-        fname = re.sub(r'[_\-]', ' ', fname)
-        # Remove common resume words
-        fname = re.sub(r'\b(resume|cv|curriculum|vitae|updated|final|new)\b', '', fname, flags=re.IGNORECASE).strip()
-        words = [w for w in fname.split() if len(w) >= 2 and w[0].isupper()]
-        if 2 <= len(words) <= 4:
-            candidate = ' '.join(words)
-            if not any(kw in candidate.upper() for kw in NOT_NAME_KEYWORDS):
-                logger.info(f"Name extracted from filename: {candidate}")
-                return candidate
-
-    # ── Strategy 4: Smart line scan ───────────────────────────────────────────
+    # ── Strategy 3: Smart line scan ───────────────────────────────────────────
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     for line in lines[:15]:
         # Skip if contains digits (year, phone, roll number etc)
         if re.search(r'\d', line):
             continue
-        # Skip email lines
+        # Skip email / URL lines
         if '@' in line or 'www.' in line.lower() or 'http' in line.lower():
             continue
         # Skip lines with institution/company keywords
@@ -197,12 +181,13 @@ def extract_name(text: str, filename: str = "") -> str:
         # Skip lines with punctuation like commas, colons (addresses, titles)
         if any(c in line for c in [',', ':', ';', '|', '/']):
             continue
-        # Each word should start with capital letter
+        # Each word should start with capital letter (proper noun pattern)
         if all(w[0].isupper() for w in words if w):
-            logger.info(f"Name extracted via line scan: {line}")
             return line
 
     return ""
+
+
 
 
 
