@@ -163,30 +163,57 @@ def extract_name(text: str) -> str:
 
 
 def extract_education(text: str) -> list:
-    """Extract education information by searching for degree keywords and context."""
+    """Extract ONLY actual degree/qualification entries — skips objective, summary, seeking lines."""
     degree_keywords = [
         'B.Tech', 'B.E', 'B.Sc', 'B.Com', 'B.A', 'BCA', 'BBA',
         'M.Tech', 'M.E', 'M.Sc', 'MBA', 'MCA', 'M.A', 'M.Com',
         'Ph.D', 'PhD', 'Bachelor', 'Master', 'Doctorate',
         'B.S.', 'M.S.', 'B.Eng', 'M.Eng',
-        '10th', '12th', 'HSC', 'SSC', 'Diploma', 'Associate'
+        '10th', '12th', 'HSC', 'SSC', 'Diploma', 'Associate',
+        'Bachelor of Technology', 'Bachelor of Science', 'Bachelor of Commerce',
+        'Master of Technology', 'Master of Science', 'Master of Business',
+        'Secondary School', 'Higher Secondary',
     ]
+
+    # Words that indicate it's NOT an education entry (objective/summary/description)
+    SKIP_WORDS = [
+        'seeking', 'looking for', 'motivated', 'passionate', 'dedicated',
+        'objective', 'summary', 'career', 'opportunity', 'position', 'role',
+        'graduate in', 'student of', 'pursuing',  # only skip if these appear alone
+        'entry-level', 'fresher', 'aspiring',
+    ]
+
     found = []
     lines = text.split('\n')
-    for i, line in enumerate(lines):
-        if any(kw.lower() in line.lower() for kw in degree_keywords):
-            cleaned_line = line.strip()
-            if cleaned_line and len(cleaned_line) > 3:
-                found.append(cleaned_line)
-    # Return unique entries, max 5
+    for line in lines:
+        line_stripped = line.strip()
+        if not line_stripped or len(line_stripped) < 4:
+            continue
+        line_lower = line_stripped.lower()
+
+        # Must contain a degree keyword
+        if not any(kw.lower() in line_lower for kw in degree_keywords):
+            continue
+
+        # Skip if it's clearly an objective/summary sentence
+        if any(skip in line_lower for skip in SKIP_WORDS):
+            continue
+
+        # Skip very long lines (likely descriptions, not degree titles)
+        if len(line_stripped) > 120:
+            continue
+
+        found.append(line_stripped)
+
+    # Deduplicate
     seen = set()
     unique = []
     for item in found:
-        key = item.lower()[:40]
+        key = item.lower()[:50]
         if key not in seen:
             seen.add(key)
             unique.append(item)
-    return unique[:5]
+    return unique[:6]
 
 
 def extract_experience_years(text: str) -> float:
@@ -270,36 +297,68 @@ def extract_projects(text: str) -> list:
 
 
 def extract_certifications(text: str) -> list:
-    """Extract certifications from the Certifications section or inline mentions."""
-    # Try section-based extraction
+    """Extract certifications — stops at declaration/signature, skips non-cert content."""
+
+    # Words that mark end of certifications (declaration section)
+    STOP_WORDS = [
+        'declaration', 'i hereby declare', 'i declare', 'signature',
+        'place:', 'date:', 'references', 'referee',
+        'hereby declare that', 'information provided above',
+        'true and correct', 'knowledge and belief',
+    ]
+
+    # Words that indicate a line is NOT a certification
+    INVALID_CERT_WORDS = [
+        'declaration', 'signature', 'hereby', 'declare', 'knowledge',
+        'belief', 'true and correct', 'information provided',
+        'place', 'date', 'sincerely', 'regards', 'thank you',
+        'linkedin', 'github', 'http', 'www.', '.com', '.in', '@',
+    ]
+
+    # Try section-based extraction first
     section_text = extract_section(
         text,
-        ['certifications', 'certificates', 'certification', 'credentials', 'courses']
+        ['certifications', 'certificates', 'certification', 'credentials', 'courses', 'achievements']
     )
 
     certifications = []
     if section_text:
         lines = [line.strip() for line in section_text.split('\n') if line.strip()]
         for line in lines:
-            clean_line = re.sub(r'^[\•\-\*\u2022\u25cf]\s*', '', line).strip()
-            if len(clean_line) > 5:
-                certifications.append(clean_line)
+            line_lower = line.lower()
 
-    # Also look for common certification keywords inline
-    cert_patterns = [
-        r'AWS\s+Certified\s+[\w\s]+',
-        r'Google\s+(?:Cloud\s+)?Certified\s+[\w\s]+',
-        r'Microsoft\s+Certified\s+[\w\s]+',
-        r'Cisco\s+Certified\s+[\w\s]+',
-        r'(?:TensorFlow|PyTorch|Coursera|edX|Udemy)\s+Certificate\s+(?:in\s+)?[\w\s]+',
-    ]
-    for pattern in cert_patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            cert = match.group(0).strip()
-            if cert not in certifications:
-                certifications.append(cert)
+            # Stop if we hit a declaration/signature block
+            if any(stop in line_lower for stop in STOP_WORDS):
+                break
 
-    return certifications[:10]
+            # Skip lines with invalid content
+            if any(inv in line_lower for inv in INVALID_CERT_WORDS):
+                continue
+
+            clean_line = re.sub(r'^[\•\-\*\u2022\u25cf\d\.]+\s*', '', line).strip()
+
+            # Skip very short or very long lines
+            if len(clean_line) < 6 or len(clean_line) > 200:
+                continue
+
+            certifications.append(clean_line)
+
+    # Also look for well-known certification patterns inline (only if section not found)
+    if not certifications:
+        cert_patterns = [
+            r'(?:NPTEL|Coursera|edX|Udemy|LinkedIn Learning)[\s:]+[\w\s\-&()]{5,80}',
+            r'AWS\s+Certified\s+[\w\s]{3,50}',
+            r'Google\s+(?:Cloud\s+)?Certified\s+[\w\s]{3,50}',
+            r'Microsoft\s+Certified[\s:]+[\w\s]{3,50}',
+            r'Cisco\s+Certified\s+[\w\s]{3,50}',
+        ]
+        for pattern in cert_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                cert = match.group(0).strip()
+                if cert not in certifications and len(cert) > 8:
+                    certifications.append(cert)
+
+    return certifications[:8]
 
 
 def extract_keywords(text: str, top_n: int = 20) -> list:
