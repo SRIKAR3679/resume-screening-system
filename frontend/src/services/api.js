@@ -1,7 +1,10 @@
 import axios from 'axios'
 
-// Frontend and backend run on same server — always use /api
-const API_BASE = '/api'
+// Dev: Vite proxy → localhost:8000
+// Production (GitHub Pages): call Render backend directly
+const API_BASE = import.meta.env.DEV
+  ? '/api'
+  : 'https://resume-screening-system-kqtv.onrender.com/api'
 
 // Create axios instance
 const api = axios.create({

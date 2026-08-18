@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // No base path needed — served from root on Render
+  base: '/resume-screening-system/', // Required for GitHub Pages
   server: {
     port: 5173,
     proxy: {
