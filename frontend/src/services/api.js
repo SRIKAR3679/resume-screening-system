@@ -4,7 +4,7 @@ import axios from 'axios'
 // In production (GitHub Pages): call Render backend directly
 const API_BASE = import.meta.env.DEV
   ? '/api'
-  : 'https://resume-screening-api-ijjk.onrender.com/api'
+  : 'https://resume-screening-system-kqtv.onrender.com/api'
 
 // Create axios instance
 const api = axios.create({

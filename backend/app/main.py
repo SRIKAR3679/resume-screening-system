@@ -18,8 +18,9 @@ app.add_middleware(
         'http://localhost:3000',
         'http://localhost:5173',
         'http://localhost:5174',
-        'https://srikar3679.github.io',           # GitHub Pages
+        'https://srikar3679.github.io',
         'https://srikar3679.github.io/resume-screening-system',
+        'https://resume-screening-system-kqtv.onrender.com',
     ],
     allow_credentials=True,
     allow_methods=["*"],
