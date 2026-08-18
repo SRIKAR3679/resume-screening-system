@@ -106,11 +106,29 @@ def extract_phone(text: str) -> str:
     return ""
 
 
-def extract_name(text: str) -> str:
+def extract_name(text: str, filename: str = "") -> str:
     """
-    Extract candidate name — skips institution/college/company names.
-    Uses spaCy NER first, then smart regex fallback.
+    Extract candidate name using multiple strategies (most reliable first):
+    1. 'Name: XXX' label in resume (very common in Indian resumes)
+    2. spaCy NER PERSON entity
+    3. Filename hint (e.g. 'Gouthami Resume.pdf')
+    4. Smart line scan skipping institutions, long ALL-CAPS lines
     """
+
+    # ── Strategy 1: Look for "Name:" label ────────────────────────────────────
+    name_label_patterns = [
+        r'(?:^|\n)\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
+        r'(?:^|\n)\s*Full\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
+        r'(?:^|\n)\s*Candidate\s*Name\s*[:]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})',
+    ]
+    for pattern in name_label_patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match:
+            name = match.group(1).strip()
+            if 2 <= len(name.split()) <= 5 and len(name) >= 4:
+                logger.info(f"Name extracted via label: {name}")
+                return name
+
     # Words that indicate it's NOT a person's name
     NOT_NAME_KEYWORDS = [
         'COLLEGE', 'UNIVERSITY', 'INSTITUTE', 'SCHOOL', 'ACADEMY', 'POLYTECHNIC',
@@ -120,46 +138,73 @@ def extract_name(text: str) -> str:
         'DEPARTMENT', 'FACULTY', 'MANAGEMENT', 'ENGINEERING', 'SCIENCE',
         'EDUCATION', 'EXPERIENCE', 'SKILLS', 'CONTACT', 'ADDRESS',
         'PHARMACY', 'MEDICAL', 'HOSPITAL', 'CLINIC', 'BANK', 'FINANCE',
+        'NARAYANA', 'CHAITANYA', 'BHARATI', 'VIDYALAYA', 'VIKAS', 'KENDRIYA',
+        'INTERNATIONAL', 'NATIONAL', 'GLOBAL', 'PUBLIC', 'PRIVATE', 'GOVERNMENT',
+        'BHAVAN', 'NIKETAN', 'MANDIR', 'PEETH', 'SADAN', 'PARISHAD',
+        'BOARD', 'COUNCIL', 'SOCIETY', 'TRUST', 'COMMITTEE',
     ]
 
-    # Try spaCy NER first
+    # ── Strategy 2: spaCy NER ─────────────────────────────────────────────────
     try:
         import spacy
         nlp = spacy.load("en_core_web_sm")
-        doc = nlp(text[:600])
+        doc = nlp(text[:800])
         for ent in doc.ents:
             if ent.label_ == "PERSON" and len(ent.text.split()) >= 2:
                 name = ent.text.strip()
-                # Validate: not an institution
                 if not any(kw in name.upper() for kw in NOT_NAME_KEYWORDS):
+                    logger.info(f"Name extracted via spaCy: {name}")
                     return name
     except Exception:
         pass
 
-    # Fallback: scan first 10 lines for a person name
+    # ── Strategy 3: Filename hint ─────────────────────────────────────────────
+    if filename:
+        # e.g. "Gouthami Resume.pdf" or "john_doe_cv.pdf"
+        fname = re.sub(r'\.(pdf|docx|doc)$', '', filename, flags=re.IGNORECASE)
+        fname = re.sub(r'[_\-]', ' ', fname)
+        # Remove common resume words
+        fname = re.sub(r'\b(resume|cv|curriculum|vitae|updated|final|new)\b', '', fname, flags=re.IGNORECASE).strip()
+        words = [w for w in fname.split() if len(w) >= 2 and w[0].isupper()]
+        if 2 <= len(words) <= 4:
+            candidate = ' '.join(words)
+            if not any(kw in candidate.upper() for kw in NOT_NAME_KEYWORDS):
+                logger.info(f"Name extracted from filename: {candidate}")
+                return candidate
+
+    # ── Strategy 4: Smart line scan ───────────────────────────────────────────
     lines = [line.strip() for line in text.split('\n') if line.strip()]
-    for line in lines[:10]:
-        # Skip if contains digits (year, phone, etc)
+    for line in lines[:15]:
+        # Skip if contains digits (year, phone, roll number etc)
         if re.search(r'\d', line):
             continue
-        # Skip if contains @ (email)
-        if '@' in line:
+        # Skip email lines
+        if '@' in line or 'www.' in line.lower() or 'http' in line.lower():
             continue
-        # Skip if it contains institution/company keywords
+        # Skip lines with institution/company keywords
         if any(kw in line.upper() for kw in NOT_NAME_KEYWORDS):
             continue
-        # Skip very long lines (likely descriptions)
-        if len(line) > 50:
+        # Skip very long lines (descriptions, addresses)
+        if len(line) > 45:
             continue
-        # Must have 2+ words, all looking like name parts
+        # Skip lines that are ALL CAPS and more than 2 words (institution names)
+        if line.isupper() and len(line.split()) > 2:
+            continue
+        # Skip single-word lines
         words = line.split()
         if len(words) < 2 or len(words) > 5:
             continue
-        # Each word should start with capital (proper noun)
+        # Skip lines with punctuation like commas, colons (addresses, titles)
+        if any(c in line for c in [',', ':', ';', '|', '/']):
+            continue
+        # Each word should start with capital letter
         if all(w[0].isupper() for w in words if w):
+            logger.info(f"Name extracted via line scan: {line}")
             return line
 
     return ""
+
+
 
 
 def extract_education(text: str) -> list:
@@ -550,7 +595,7 @@ def parse_resume(file_path: str) -> dict:
                 logger.info(f"Groq parsed: {groq_result.get('name')} | {len(groq_result.get('skills', []))} skills")
                 return {
                     "text": cleaned_text,
-                    "name": groq_result.get("name") or extract_name(raw_text),
+                    "name": groq_result.get("name") or extract_name(raw_text, file_path_obj.name),
                     "email": groq_result.get("email") or extract_email(cleaned_text),
                     "phone": groq_result.get("phone") or extract_phone(cleaned_text),
                     "education": json.dumps(groq_result.get("education") or extract_education(raw_text)),
@@ -575,7 +620,7 @@ def parse_resume(file_path: str) -> dict:
 
     return {
         "text": cleaned_text,
-        "name": extract_name(raw_text),
+        "name": extract_name(raw_text, file_path_obj.name),
         "email": extract_email(cleaned_text),
         "phone": extract_phone(cleaned_text),
         "education": json.dumps(education_list),

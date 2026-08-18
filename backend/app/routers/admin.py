@@ -89,7 +89,9 @@ def reparse_all_resumes(current_user: User = Depends(get_admin_user), db: Sessio
                 continue
 
             # Re-extract all fields with improved parser
-            name  = extract_name(text)
+            import os
+            fname = os.path.basename(resume.file_path or resume.filename or "")
+            name  = extract_name(text, fname)
             phone = extract_phone(text)
             edu   = extract_education(text)
             exp   = extract_experience_years(text)
