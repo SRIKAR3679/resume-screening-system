@@ -56,6 +56,96 @@ def deactivate_user(id: int, current_user: User = Depends(get_admin_user), db: S
     user = db.query(User).filter(User.id == id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.is_active = False
+    db.delete(user)
     db.commit()
-    return {"detail": "User deactivated"}
+    return {"detail": "User deleted"}
+
+
+@router.post("/reparse-resumes")
+def reparse_all_resumes(current_user: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    """
+    Re-parse all stored resumes using the improved parser.
+    Re-extracts name, phone, skills from stored extracted_text.
+    Also re-runs skill extraction and updates resume_skills table.
+    """
+    import json
+    from app.ai.resume_parser import (
+        extract_name, extract_email, extract_phone,
+        extract_education, extract_experience_years,
+        extract_projects, extract_certifications, extract_keywords
+    )
+    from app.ai.skill_extractor import extract_skills_from_text, normalize_skill
+    from app.models.skill import Skill, resume_skills
+
+    resumes = db.query(Resume).all()
+    updated = 0
+    errors = []
+
+    for resume in resumes:
+        try:
+            text = resume.extracted_text or ""
+            if not text.strip():
+                errors.append(f"Resume {resume.id}: no text stored")
+                continue
+
+            # Re-extract all fields with improved parser
+            name  = extract_name(text)
+            phone = extract_phone(text)
+            edu   = extract_education(text)
+            exp   = extract_experience_years(text)
+            proj  = extract_projects(text)
+            certs = extract_certifications(text)
+            kws   = extract_keywords(text)
+
+            # Update resume fields
+            if name:  resume.name  = name
+            if phone: resume.phone = phone
+            resume.education        = json.dumps(edu)
+            resume.experience_years = exp
+            resume.projects         = json.dumps(proj)
+            resume.certifications   = json.dumps(certs)
+            resume.keywords         = json.dumps(kws)
+
+            # Re-extract skills with improved word-boundary matching
+            skill_names = extract_skills_from_text(text)
+
+            # Try Groq skill extraction too
+            try:
+                from app.ai.groq_engine import extract_skills_with_groq, is_groq_available
+                if is_groq_available():
+                    groq_skills = extract_skills_with_groq(text)
+                    if groq_skills:
+                        skill_names = list(set(skill_names + groq_skills))
+            except Exception:
+                pass
+
+            # Clear existing skills for this resume
+            db.execute(resume_skills.delete().where(resume_skills.c.resume_id == resume.id))
+
+            # Re-insert updated skills
+            for sname in skill_names:
+                norm = normalize_skill(sname)
+                skill_obj = db.query(Skill).filter(Skill.normalized_name == norm.lower()).first()
+                if not skill_obj:
+                    skill_obj = Skill(name=norm, normalized_name=norm.lower(), category="general")
+                    db.add(skill_obj)
+                    db.flush()
+                db.execute(resume_skills.insert().values(
+                    resume_id=resume.id,
+                    skill_id=skill_obj.id
+                ))
+
+            db.commit()
+            updated += 1
+
+        except Exception as e:
+            errors.append(f"Resume {resume.id}: {str(e)}")
+            db.rollback()
+
+    return {
+        "status": "done",
+        "total": len(resumes),
+        "updated": updated,
+        "errors": errors
+    }
+
