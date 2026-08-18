@@ -218,31 +218,75 @@ def extract_education(text: str) -> list:
 
 def extract_experience_years(text: str) -> float:
     """
-    Extract total years of experience from resume text.
-    Handles patterns like '2 years', '3+ years', date ranges like 'Jan 2021 – Dec 2022'.
+    Extract ACTUAL work experience years from resume.
+    - Uses explicit "X years of experience" mentions
+    - Looks ONLY inside Work Experience section for date ranges
+    - Returns 0 for freshers / students with no work history
+    - Never calculates from education or other section years
     """
-    # Direct mention of experience years
-    patterns = [
-        r'(\d+(?:\.\d+)?)\+?\s*years?\s*(?:of\s*)?(?:experience|exp)',
-        r'experience\s*(?:of\s*)?(\d+(?:\.\d+)?)\+?\s*years?',
+    # 1. Explicit mention: "2 years of experience", "3+ years exp"
+    explicit_patterns = [
+        r'(\d+(?:\.\d+)?)\+?\s*years?\s*(?:of\s*)?(?:work\s*)?(?:experience|exp)',
+        r'(?:experience|exp)\s*(?:of\s*)?(\d+(?:\.\d+)?)\+?\s*years?',
+        r'(\d+(?:\.\d+)?)\+?\s*years?\s*in\s+(?:the\s+)?(?:industry|field|domain)',
     ]
-    for pattern in patterns:
+    for pattern in explicit_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return float(match.group(1))
+            val = float(match.group(1))
+            if 0 < val < 40:  # sanity check
+                return val
 
-    # Try to compute from date ranges
-    year_pattern = r'\b(20\d{2}|19\d{2})\b'
-    years_found = [int(y) for y in re.findall(year_pattern, text)]
-    if len(years_found) >= 2:
-        min_year = min(years_found)
-        max_year = max(years_found)
-        if 1990 <= min_year <= 2030 and 1990 <= max_year <= 2030:
+    # 2. Fresher / no experience keywords → return 0
+    fresher_keywords = [
+        'fresher', 'no experience', '0 years', 'zero experience',
+        'no work experience', 'seeking entry', 'entry-level',
+        'recent graduate', 'fresh graduate',
+    ]
+    text_lower = text.lower()
+    if any(kw in text_lower for kw in fresher_keywords):
+        return 0.0
+
+    # 3. Look ONLY in Work Experience section for date ranges
+    EXPERIENCE_SECTION_HEADERS = [
+        'work experience', 'experience', 'employment history',
+        'professional experience', 'internship', 'internships',
+        'work history', 'career history', 'job experience',
+    ]
+    EDUCATION_SECTION_HEADERS = [
+        'education', 'academic', 'qualification', 'degree',
+        'certifications', 'projects', 'skills', 'declaration',
+    ]
+
+    # Extract just the experience section
+    exp_section = ""
+    text_lines = text.split('\n')
+    in_exp_section = False
+    for line in text_lines:
+        line_lower = line.strip().lower()
+        if any(h in line_lower for h in EXPERIENCE_SECTION_HEADERS) and len(line.strip()) < 40:
+            in_exp_section = True
+            continue
+        if in_exp_section:
+            if any(h in line_lower for h in EDUCATION_SECTION_HEADERS) and len(line.strip()) < 40:
+                break
+            exp_section += line + '\n'
+
+    # Only compute from years found in the experience section
+    if exp_section.strip():
+        year_pattern = r'\b(20\d{2}|19\d{2})\b'
+        years_found = [int(y) for y in re.findall(year_pattern, exp_section)]
+        if len(years_found) >= 2:
+            min_year = min(years_found)
+            max_year = max(years_found)
             computed = max_year - min_year
-            if 0 < computed < 40:
-                return float(computed)
+            if 0 < computed < 30:
+                return float(round(computed, 1))
 
+    # 4. No experience found → 0 (student/fresher)
     return 0.0
+
+
 
 
 def extract_section(text: str, section_names: list, next_sections: list = None) -> str:
